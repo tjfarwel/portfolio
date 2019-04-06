@@ -1,0 +1,87 @@
+---
+title: 'Lab 4 - Task 4: Compare Shakespeare and Mark Twain'
+author: "Travis Farwell"
+date: "November 1, 2017"
+output: html_document
+---
+
+This tutorial while flow through steps used to compare and contrast the output of 2 term count files for Shakespeare and Mark Twain texts that have been produced with mapreduce programs simulating what would happen if the texts were distributed on a hadoop cluster. First the output files are read into dataframes and processed with regular expressions to remove the brackets since the output are in python lists. The two dataframes are merged into one by term to create a document term matrix (dataframe). Finally, column headers are added to keep track of the term counts of the two authors.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+shakespeare <- read.csv("shakespeare_output.txt",header = FALSE,stringsAsFactors =FALSE )
+shakespeare[,1] <- sub(pattern = '\\[','',shakespeare[,1])
+shakespeare[,2] <- sub(pattern = '\\]','',shakespeare[,2])
+shakespeare[,2] <- as.integer(shakespeare[,2])
+names(shakespeare) <- c("term", "count")
+
+twain <- read.csv("twain_output.txt",header = F,stringsAsFactors = F)
+twain[,1] <- sub(pattern = '\\[','',twain[,1])
+twain[,2] <- sub(pattern = '\\]','',twain[,2])
+twain[,2] <- as.integer(twain[,2])
+names(twain) <- c("term", "count")
+
+dtm <- merge(twain,shakespeare,by.x = "term",by.y="term",all=T)
+dtm[which(is.na(dtm$count.x)),2] <- 0 
+dtm[which(is.na(dtm$count.y)),3] <- 0
+
+names(dtm)[2:3] <- c("twain","shakespeare") 
+```
+
+Finding the correlation of the author's term counts shows that they are quite correlated (0.9). Plotting each point and labeling the top 15 Twain terms does not give us much insight as most of these are stop words. However, if we were given the count of a Twain word we could probably give a good prediction of how many times the word appears in the Shakepeare text from the high correlation score.
+
+```{r }
+cor(dtm$twain,dtm$shakespeare)
+plot(dtm$twain,dtm$shakespeare, xlab="Twain Term Counts",ylab="Shakespeare Term Counts",col="blue",ylim =c(0,30000) )
+dtm <- dtm[order(-dtm$twain),]
+text(dtm$twain[1:15],dtm$shakespeare[1:15],labels=dtm$term[1:15],pos = 3)
+```
+
+Creating Term Frequency-Inverse Document Frequecy scores may give clues on the imporant words for each writer. First a term frequency dataframe is created, which is the ratio of terms counts to number of terms in document. Words appearing many times will have higher TF values. Then IDF values are found, which is the log of the number of documents divided by the number of documents that the term appears in. So, if the term appears in both documents, it's IDF value will be 0 ( log(1) equals 0). Last, the TF values are multiplied by the IDF values for each separate document. 
+
+```{r}
+tf <- data.frame(term = dtm$term)
+tf$twain <- dtm$twain/nrow(twain)
+tf$shakespeare <- dtm$shakespeare/nrow(shakespeare)
+
+idf <- data.frame(term = dtm$term)
+idf$idf <- log(2/ifelse(dtm$twain == 0 | dtm$shakespeare == 0, 1, 2))
+
+dtm$twain_tf_ifd <- tf$twain * idf$idf
+dtm$shakespeare_tf_ifd <- tf$shakespeare * idf$idf
+```
+
+With only 2 documents, any term that appears in both will have a score of 0. This calculation gives us the highest term counts for one author that do not appear at all in the other author's writings. Plotting each author's IF*IDF will show unique terms for each author.
+
+```{r}
+#plot top ifidf values
+dtm <- dtm[order(-dtm$twain_tf_ifd),]
+#dtm <- dtm[21:nrow(dtm),]
+barplot(height = dtm$twain_tf_ifd[1:30],names.arg =  dtm$term[1:30],las=2, main="Twain Unique Words",col="yellow",ylab="IF*IDF")
+
+dtm <- dtm[order(-dtm$shakespeare_tf_ifd),]
+barplot(height = dtm$shakespeare_tf_ifd[1:30],names.arg =  dtm$term[1:30],las=2, main="Shakespeare Unique Words",col="purple",ylab="IF*IDF")
+```
+
+Obviously, plenty of names show up in each's words that do not appear in the others. Some interesting Twain terms that don't appear in Shakespeare's; "around","mr", "trying","everybody", and "result". This is somewhat surprising. Twain also uses a lot of contractions that Shakespeare doesn't.  A couple of interesting words in Shakespeare's; "download","inc",and "electronic". It doesn't seem like these words should have existed back then. After a quick grep on the command line, these show up in copyright warnings in the text file that should be removed for further analysis.
+
+How can we find important words that show up in both works? One idea is to find the ratio of term counts of one author compared to the other and vice-versa. R will give infinite values when dividing by zero occurs. These are replaced with NA's. Next each is ordered by highest ratio and plotted. 
+
+```{r}
+tf$twain_to_shakespeare <- tf$twain / tf$shakespeare
+tf$shakespeare_to_twain <- tf$shakespeare /tf$twain
+#Convert Inf to NA
+tf$shakespeare_to_twain <- ifelse(tf$shakespeare_to_twain == Inf,NA,tf$shakespeare_to_twain)
+tf$twain_to_shakespeare <- ifelse(tf$twain_to_shakespeare == Inf,NA,tf$twain_to_shakespeare)
+
+tf <- tf[order(-tf$twain_to_shakespeare),]
+barplot(height = tf$twain_to_shakespeare[1:30],names.arg =  tf$term[1:30],las=2,main="Twain to Shakespeare Word Ratio",col="green")
+
+tf <- tf[order(-tf$shakespeare_to_twain),]
+barplot(height = tf$shakespeare_to_twain[1:30],names.arg =  tf$term[1:30],las=2,main="Shakespeare to Twain Word Ratio",
+        col="blue")
+```
+
+Some of the words that appeared in both but much more in Twain's are somewhat surprising. For instance; "really", "looked", and "apparently". This could possibly be a technique to help track the origins of words in writing. Words rarely used back then that show up a lot in present day could possibly show early usage. In fact, looking up where Shakespeare uses the word "dollars" in his writing brings up a discussion forum of the first use of the word "dollar" in English literature.
+
+

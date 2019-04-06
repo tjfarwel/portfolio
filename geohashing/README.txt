@@ -1,0 +1,1 @@
+Map will not show up in Microsoft Edge. Worked with Chrome and Firefox.
